@@ -1,3 +1,7 @@
+import CommandPanel from './components/CommandPanel';
+import ConnectivityStatus from './components/ConnectivityStatus';
+import MetricsChart from './components/MetricsChart';
+
 export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
@@ -31,6 +35,21 @@ export default function Home() {
             subtitle="Per instance average"
           />
         </div>
+
+        {/* Connectivity Status Section */}
+        <section className="mb-8 bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700">
+          <ConnectivityStatus />
+        </section>
+
+        {/* Metrics Chart Section */}
+        <section className="mb-8 bg-gray-800/50 backdrop-blur-sm rounded-lg border border-gray-700">
+          <MetricsChart />
+        </section>
+
+        {/* Command Panel Section */}
+        <section className="mb-8 bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700">
+          <CommandPanel />
+        </section>
 
         <section className="bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700">
           <h2 className="text-2xl font-semibold mb-4">Quick Stats</h2>
