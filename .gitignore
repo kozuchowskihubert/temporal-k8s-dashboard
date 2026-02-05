@@ -1,0 +1,19 @@
+# Secrets and Environment Variables
+.env
+.env.*
+*.secret.yaml
+*.secret.yml
+
+# Documentation
+*.md
+README.md
+CONTRIBUTING.md
+LICENSE.md
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Helm/Kubernetes Generated Files
+debug_template.yaml
+*.tgz

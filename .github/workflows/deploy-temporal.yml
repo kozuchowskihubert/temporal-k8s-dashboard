@@ -1,0 +1,224 @@
+name: Deploy Temporal to Kubernetes
+
+on:
+  push:
+    branches:
+      - main
+      - production
+    paths:
+      - 'backend/temporal/**'
+      - 'backend/database/**'
+      - '.github/workflows/deploy-temporal.yml'
+  
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+      dry_run:
+        description: 'Dry run mode (validate only)'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  NAMESPACE: temporal-prod
+  HELM_VERSION: 3.14.0
+  KUBECTL_VERSION: 1.28.0
+  TEMPORAL_CHART_VERSION: 0.73.1
+  # Helper paths
+  VALUES_FILE: backend/temporal/temporal-values-neon.yaml
+  NAMESPACE_FILE: backend/temporal/temporal-namespace.yaml
+  SECRET_FILE: backend/database/temporal-db-secret.yaml
+
+jobs:
+  validate:
+    name: Validate Configuration
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      
+      - name: Validate Helm values
+        run: |
+          echo "🔍 Validating Helm values file..."
+          helm lint --values ${{ env.VALUES_FILE }} \
+            --repo https://go.temporal.io/helm-charts \
+            temporal
+      
+      - name: Validate Kubernetes manifests
+        run: |
+          echo "🔍 Validating Kubernetes manifests..."
+          kubectl --dry-run=client apply -f ${{ env.NAMESPACE_FILE }}
+          kubectl --dry-run=client apply -f ${{ env.SECRET_FILE }}
+
+  deploy:
+    name: Deploy Temporal Cluster
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+      
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      
+      - name: Configure Kubernetes context
+        run: |
+          echo "🔧 Configuring Kubernetes context..."
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          
+          # Verify connection
+          kubectl cluster-info
+          kubectl get nodes
+      
+      - name: Create namespace
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          echo "🔧 Creating namespace..."
+          kubectl apply -f ${{ env.NAMESPACE_FILE }}
+      
+      - name: Update database secret
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          echo "🔐 Updating database secret..."
+          # Delete existing secret if it exists
+          kubectl delete secret temporal-db-secret -n ${{ env.NAMESPACE }} --ignore-not-found=true
+          
+          # Create secret from GitHub secret instead of file
+          kubectl create secret generic temporal-db-secret \
+            -n ${{ env.NAMESPACE }} \
+            --from-literal=password="${{ secrets.NEON_DB_PASSWORD }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+      
+      - name: Add Temporal Helm repository
+        run: |
+          echo "📦 Adding Temporal Helm repository..."
+          helm repo add temporalio https://go.temporal.io/helm-charts
+          helm repo update
+      
+      - name: Deploy Temporal (Dry Run)
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "🧪 DRY RUN: Simulating deployment..."
+          helm install temporal temporalio/temporal \
+            --namespace ${{ env.NAMESPACE }} \
+            --version ${{ env.TEMPORAL_CHART_VERSION }} \
+            --values ${{ env.VALUES_FILE }} \
+            --dry-run --debug
+      
+      - name: Deploy Temporal
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          echo "🚀 Deploying Temporal cluster..."
+          helm upgrade --install temporal temporalio/temporal \
+            --namespace ${{ env.NAMESPACE }} \
+            --version ${{ env.TEMPORAL_CHART_VERSION }} \
+            --values ${{ env.VALUES_FILE }} \
+            --timeout 15m \
+            --wait \
+            --atomic
+      
+      - name: Verify deployment
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          echo "✅ Verifying deployment..."
+          
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=temporal \
+            -n ${{ env.NAMESPACE }} \
+            --timeout=600s
+          
+          # Display pod status
+          kubectl get pods -n ${{ env.NAMESPACE }}
+          
+          # Display services
+          kubectl get svc -n ${{ env.NAMESPACE }}
+      
+      - name: Test Temporal CLI
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          echo "🧪 Testing Temporal CLI..."
+          
+          # Wait for admin tools to be ready
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/component=admintools \
+            -n ${{ env.NAMESPACE }} \
+            --timeout=300s
+          
+          # Get admin tools pod name
+          ADMINTOOLS_POD=$(kubectl get pod -n ${{ env.NAMESPACE }} \
+            -l app.kubernetes.io/component=admintools \
+            -o jsonpath='{.items[0].metadata.name}')
+          
+          # Test namespace list
+          kubectl exec -n ${{ env.NAMESPACE }} $ADMINTOOLS_POD -- tctl namespace list
+      
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "========================================"
+          echo "✅ Temporal Deployment Successful"
+          echo "========================================"
+          echo ""
+          echo "Namespace: ${{ env.NAMESPACE }}"
+          echo "Chart Version: ${{ env.TEMPORAL_CHART_VERSION }}"
+          echo "Frontend: temporal-frontend.${{ env.NAMESPACE }}.svc.cluster.local:7233"
+          echo "Web UI: temporal-web.${{ env.NAMESPACE }}.svc.cluster.local:8080"
+          echo ""
+          echo "To access Web UI locally:"
+          echo "kubectl port-forward -n ${{ env.NAMESPACE }} svc/temporal-web 8080:8080"
+
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+    
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+      
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      
+      - name: Configure Kubernetes context
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+      
+      - name: Rollback Helm release
+        run: |
+          echo "⚠️ Deployment failed, initiating rollback..."
+          helm rollback temporal -n ${{ env.NAMESPACE }}
+          
+          echo "✅ Rollback completed"
+          kubectl get pods -n ${{ env.NAMESPACE }}

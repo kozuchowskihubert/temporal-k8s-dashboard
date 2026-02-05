@@ -1,0 +1,91 @@
+# Temporal Staging Configuration
+# 1 Replica, NEON DB
+
+global:
+  image:
+    pullPolicy: IfNotPresent
+
+server:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  config:
+    persistence:
+      defaultStore: default
+      visibilityStore: visibility
+      numHistoryShards: 4
+      default:
+        driver: "sql"
+        sql:
+          driver: "postgres12"
+          databaseName: neondb
+          connectAddr: ep-wispy-paper-aaghbbh9.westus3.azure.neon.tech:5432
+          connectProtocol: tcp
+          host: ep-wispy-paper-aaghbbh9.westus3.azure.neon.tech
+          port: 5432
+          user: neondb_owner
+          existingSecret: temporal-db-secret
+          secretKey: password
+          maxConns: 10
+          maxIdleConns: 10
+          maxConnLifetime: 1h
+          tls:
+            enabled: true
+            enableHostVerification: false
+      visibility:
+        driver: "sql"
+        sql:
+          driver: "postgres12"
+          databaseName: neondb
+          connectAddr: ep-wispy-paper-aaghbbh9.westus3.azure.neon.tech:5432
+          connectProtocol: tcp
+          host: ep-wispy-paper-aaghbbh9.westus3.azure.neon.tech
+          port: 5432
+          user: neondb_owner
+          existingSecret: temporal-db-secret
+          secretKey: password
+          maxConns: 10
+          maxIdleConns: 10
+          maxConnLifetime: 1h
+          tls:
+            enabled: true
+            enableHostVerification: false
+
+frontend:
+  enabled: true
+  replicaCount: 1
+
+history:
+  enabled: true
+  replicaCount: 1
+
+matching:
+  enabled: true
+  replicaCount: 1
+
+worker:
+  enabled: true
+  replicaCount: 1
+
+web:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8080
+
+admintools:
+  enabled: true
+
+schema:
+  setup:
+    enabled: true
+  update:
+    enabled: true
