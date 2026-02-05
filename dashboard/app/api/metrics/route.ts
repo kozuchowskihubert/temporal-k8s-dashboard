@@ -31,7 +31,9 @@ async function getPodMetrics() {
         const podsByComponent: Record<string, any> = {};
 
         pods.items?.forEach((pod: any) => {
-            const component = pod.metadata?.labels?.['app.kubernetes.io/component'];
+            const component = pod.metadata?.labels?.['app.kubernetes.io/component'] ||
+                pod.metadata?.labels?.['app.kubernetes.io/name'] ||
+                pod.metadata?.labels?.['app'];
             if (!component) return;
 
             if (!podsByComponent[component]) {
