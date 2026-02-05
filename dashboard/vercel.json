@@ -1,3 +1,3 @@
-# Temporal K8s Dashboard
-
-Vercel deployment configuration will use this directory
+{
+    "framework": "nextjs"
+}

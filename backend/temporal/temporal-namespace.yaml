@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: temporal-prod
-  labels:
-    name: temporal-prod
-    environment: production
-    app: temporal
