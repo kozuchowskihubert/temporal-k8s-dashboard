@@ -56,7 +56,10 @@ export default function CommandPanel({ namespace = 'temporal-prod' }: CommandPan
 
     return (
         <div className="command-panel">
-            <h2 className="text-2xl font-bold mb-4">🔧 Kubectl Commands</h2>
+            <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                <span>🔧</span>
+                <span className="gradient-text">Kubectl Commands</span>
+            </h2>
 
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
                 {COMMANDS.map((cmd) => (
@@ -64,26 +67,27 @@ export default function CommandPanel({ namespace = 'temporal-prod' }: CommandPan
                         key={cmd.id}
                         onClick={() => executeCommand(cmd.id)}
                         disabled={loading}
-                        className="command-button p-4 bg-gradient-to-br from-blue-500 to-purple-600 
-                     hover:from-blue-600 hover:to-purple-700 text-white rounded-lg
-                     transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
-                     shadow-lg hover:shadow-xl transform hover:scale-105"
+                        className="command-button p-4 bg-gradient-to-br from-cyan-600 to-blue-700 
+                     hover:from-cyan-500 hover:to-blue-600 text-white rounded-lg
+                     transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed
+                     shadow-lg hover:shadow-xl hover:shadow-cyan-500/30 transform hover:scale-105 hover:-translate-y-1
+                     border border-cyan-400/20 hover:border-cyan-300/50"
                     >
                         <div className="text-2xl mb-1">{cmd.icon}</div>
-                        <div className="text-sm font-semibold">{cmd.label}</div>
+                        <div className="text-xs font-semibold">{cmd.label}</div>
                     </button>
                 ))}
             </div>
 
             {error && (
-                <div className="error-box bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                    <strong>Error:</strong> {error}
+                <div className="error-box bg-red-900/30 border-2 border-red-500/50 text-red-300 px-4 py-3 rounded-lg mb-4 backdrop-blur-sm">
+                    <strong className="text-red-400">Error:</strong> {error}
                 </div>
             )}
 
             {output && (
-                <div className="output-box bg-gray-900 text-green-400 p-4 rounded-lg overflow-auto max-h-96 font-mono text-sm">
-                    <pre>{output}</pre>
+                <div className="output-box bg-black/60 text-cyan-300 p-4 rounded-lg overflow-auto max-h-96 font-mono text-sm border border-cyan-500/30 shadow-inner backdrop-blur-sm">
+                    <pre className="whitespace-pre-wrap">{output}</pre>
                 </div>
             )}
         </div>

@@ -49,13 +49,13 @@ export default function MetricsChart() {
                     return (
                         <div
                             key={component}
-                            className={`metric-card p-5 rounded-lg border-2 shadow-lg ${isHealthy ? 'bg-green-50 border-green-400' : 'bg-yellow-50 border-yellow-400'
+                            className={`metric-card p-5 rounded-lg border-2 shadow-lg ${isHealthy ? 'bg-gray-800/50 border-green-500/60' : 'bg-gray-800/50 border-yellow-500/60'
                                 }`}
                         >
-                            <div className="font-bold text-lg mb-3 capitalize">{component}</div>
+                            <div className="font-bold text-lg mb-3 capitalize text-gray-100">{component}</div>
 
                             <div className="metric-bar mb-3">
-                                <div className="flex justify-between text-sm mb-1">
+                                <div className="flex justify-between text-sm mb-1 text-gray-300">
                                     <span>Health</span>
                                     <span className="font-bold">{healthPercentage.toFixed(0)}%</span>
                                 </div>
@@ -68,7 +68,7 @@ export default function MetricsChart() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div className="grid grid-cols-2 gap-2 text-sm text-gray-300">
                                 <div className="flex items-center gap-1">
                                     <span className="text-green-600 font-bold">✓</span>
                                     <span>Running: {metric.running}</span>

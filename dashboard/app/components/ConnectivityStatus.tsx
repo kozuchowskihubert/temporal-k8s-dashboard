@@ -69,10 +69,10 @@ export default function ConnectivityStatus() {
 
             <div
                 className={`status-badge mb-6 p-4 rounded-lg border-2 ${statusColor === 'green'
-                        ? 'bg-green-100 border-green-400'
-                        : statusColor === 'yellow'
-                            ? 'bg-yellow-100 border-yellow-400'
-                            : 'bg-red-100 border-red-400'
+                    ? 'bg-green-800/40 border-green-500 text-green-50'
+                    : statusColor === 'yellow'
+                        ? 'bg-yellow-800/40 border-yellow-500 text-yellow-50'
+                        : 'bg-red-800/40 border-red-500 text-red-50'
                     }`}
             >
                 <div className="flex items-center gap-2">
@@ -93,15 +93,15 @@ export default function ConnectivityStatus() {
                     <div
                         key={name}
                         className={`check-card p-4 rounded-lg border ${check.healthy
-                                ? 'bg-green-50 border-green-300'
-                                : 'bg-red-50 border-red-300'
+                            ? 'bg-green-800/30 border-green-500/60 text-gray-100'
+                            : 'bg-red-800/30 border-red-500/60 text-gray-100'
                             }`}
                     >
                         <div className="flex items-center gap-2 mb-2">
                             <span className="text-xl">{check.healthy ? '✅' : '❌'}</span>
                             <span className="font-bold capitalize">{name}</span>
                         </div>
-                        <div className="text-sm text-gray-700">{check.message}</div>
+                        <div className="text-sm text-gray-400">{check.message}</div>
                     </div>
                 ))}
             </div>
