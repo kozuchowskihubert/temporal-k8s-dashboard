@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: temporal-dashboard-sa
+  namespace: temporal-prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: temporal-dashboard-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "secrets", "namespaces"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: temporal-dashboard-binding
+subjects:
+- kind: ServiceAccount
+  name: temporal-dashboard-sa
+  namespace: temporal-prod
+roleRef:
+  kind: ClusterRole
+  name: temporal-dashboard-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-dashboard
+  namespace: temporal-prod
+  labels:
+    app: temporal-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-dashboard
+  template:
+    metadata:
+      labels:
+        app: temporal-dashboard
+    spec:
+      serviceAccountName: temporal-dashboard-sa
+      containers:
+      - name: dashboard
+        image: temporal-dashboard:latest # Change this to your actual image tag
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+          requests:
+            cpu: "10m"
+            memory: "0"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-dashboard
+  namespace: temporal-prod
+spec:
+  selector:
+    app: temporal-dashboard
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP

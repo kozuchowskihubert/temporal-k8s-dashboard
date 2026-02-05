@@ -1,138 +1,188 @@
-import { NextResponse } from 'next/server';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+import { NextRequest, NextResponse } from 'next/server';
+import { KubeConfig, CoreV1Api, V1Pod } from '@kubernetes/client-node';
+import { getProjectDetails } from '@/app/lib/neon';
+
+// Force dynamic execution for this route
+export const dynamic = 'force-dynamic';
+
+function getKubeConfig(): KubeConfig {
+    const kc = new KubeConfig();
+
+    // 1. Try loading from specific environment variables (for remote access via tunnel)
+    const k8sServer = process.env.K8S_SERVER?.trim();
+    const k8sToken = process.env.K8S_TOKEN?.trim();
+
+    if (k8sServer && k8sToken) {
+        console.log(`[Health API] Configuring for remote access to ${k8sServer}`);
+
+        const skipTlsVerify = process.env.K8S_SKIP_TLS_VERIFY === 'true';
+        const caCert = process.env.K8S_CA_CERT;
+
+        kc.loadFromOptions({
+            clusters: [
+                {
+                    name: 'remote-cluster',
+                    server: k8sServer,
+                    skipTLSVerify: skipTlsVerify,
+                    caData: caCert && !skipTlsVerify ? caCert : undefined,
+                },
+            ],
+            users: [
+                {
+                    name: 'remote-user',
+                    token: k8sToken,
+                },
+            ],
+            contexts: [
+                {
+                    name: 'remote-context',
+                    cluster: 'remote-cluster',
+                    user: 'remote-user',
+                },
+            ],
+            currentContext: 'remote-context',
+        });
+        return kc;
+    }
+
+    // 2. Try default loading (in-cluster or local ~/.kube/config)
+    try {
+        kc.loadFromDefault();
+        console.log('[Health API] Loaded default kubeconfig');
+        return kc;
+    } catch (e) {
+        console.error('[Health API] Failed to load default kubeconfig:', e);
+    }
+
+    throw new Error('Could not load Kubernetes configuration');
+}
 
 export async function GET() {
     try {
-        const checks = {
-            database: await checkDatabase(),
-            frontend: await checkFrontend(),
-            grafana: await checkGrafana(),
-            prometheus: await checkPrometheus(),
-        };
+        const kc = getKubeConfig();
+        const neonApiKey = process.env.NEON_API_KEY;
+        const neonProjectId = process.env.NEON_PROJECT_ID;
 
-        const allHealthy = Object.values(checks).every((check) => check.healthy);
+        // Run all checks in parallel with a timeout wrapper for safety
+        const [
+            database,
+            frontend,
+            grafana,
+            prometheus,
+            databaseDetails
+        ] = await Promise.all([
+            runWithTimeout(checkDatabase(kc), { healthy: false, message: 'Timeout checking database' }),
+            runWithTimeout(checkFrontend(kc), { healthy: false, message: 'Timeout checking frontend' }),
+            runWithTimeout(checkGrafana(kc), { healthy: false, message: 'Timeout checking grafana' }),
+            runWithTimeout(checkPrometheus(kc), { healthy: false, message: 'Timeout checking prometheus' }),
+            (neonApiKey && neonProjectId)
+                ? runWithTimeout(getProjectDetails(neonApiKey, neonProjectId), null)
+                : Promise.resolve(null)
+        ]);
 
-        return NextResponse.json({
-            status: allHealthy ? 'healthy' : 'degraded',
-            checks,
-            timestamp: new Date().toISOString(),
-        });
-    } catch (error) {
+        const overallHealthy =
+            database.healthy && frontend.healthy && grafana.healthy && prometheus.healthy;
+
         return NextResponse.json(
             {
-                status: 'unhealthy',
-                error: error instanceof Error ? error.message : 'Unknown error',
+                status: overallHealthy ? 'healthy' : 'degraded',
+                components: {
+                    database,
+                    frontend,
+                    grafana,
+                    prometheus,
+                },
+                database_details: databaseDetails,
             },
+            { status: 200 } // Always return 200 to allow UI to show partial status instead of crashing
+        );
+    } catch (error: any) {
+        console.error('[Health API] Unexpected error:', error);
+        return NextResponse.json(
+            { status: 'error', message: error?.message || 'Internal Server Error' },
             { status: 500 }
         );
     }
 }
 
-async function checkDatabase(): Promise<{ healthy: boolean; message: string }> {
+// Timeout wrapper helper
+async function runWithTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = 8000): Promise<T> {
+    const timeout = new Promise<T>((resolve) =>
+        setTimeout(() => {
+            console.error(`[Health API] Check timed out after ${timeoutMs}ms`);
+            resolve(fallback);
+        }, timeoutMs)
+    );
+    return Promise.race([promise, timeout]);
+}
+
+async function checkDatabase(kc: KubeConfig): Promise<{ healthy: boolean; message: string }> {
+    const k8sApi = kc.makeApiClient(CoreV1Api);
     try {
-        // Check if database secret exists (temporal uses this for postgres connection)
-        const { stdout } = await execAsync(
-            'kubectl get secret -n temporal-prod temporal-db-secret -o json 2>/dev/null || echo "{}"'
-        );
-
-        // If no secret, check if postgres pods are running instead
-        try {
-            const { stdout: podCheck } = await execAsync(
-                'kubectl get pods -n temporal-prod -l app.kubernetes.io/component=postgresql -o json 2>/dev/null || echo "{\\"items\\":[]}"'
-            );
-            const pods = JSON.parse(podCheck);
-            if (pods.items && pods.items.length > 0) {
-                const runningPods = pods.items.filter(
-                    (pod: any) => pod.status?.phase === 'Running'
-                ).length;
-                return {
-                    healthy: runningPods > 0,
-                    message: `${runningPods} PostgreSQL pod(s) running`,
-                };
-            }
-        } catch { }
-
-        const secret = JSON.parse(stdout);
-        return {
-            healthy: !!secret.metadata?.name,
-            message: secret.metadata?.name ? 'Database secret configured' : 'Using external database',
-        };
-    } catch {
-        return { healthy: false, message: 'Database configuration not found' };
+        await k8sApi.readNamespacedSecret({ name: 'temporal-db-secret', namespace: 'temporal-prod' });
+        return { healthy: true, message: 'External Database Configured' };
+    } catch (e: any) {
+        if (e?.statusCode !== 404 && e?.response?.statusCode !== 404) {
+            // If error is not 404, valid connection but other error
+            console.error('[Health API] Database check error:', e);
+            return { healthy: false, message: `Check failed: ${e.message}` };
+        }
+        return { healthy: false, message: 'Database secret not found' };
     }
 }
 
-async function checkFrontend(): Promise<{ healthy: boolean; message: string }> {
+async function checkFrontend(kc: KubeConfig): Promise<{ healthy: boolean; message: string }> {
+    const k8sApi = kc.makeApiClient(CoreV1Api);
     try {
-        const { stdout } = await execAsync(
-            'kubectl get pods -n temporal-prod -l app.kubernetes.io/component=frontend -o json'
-        );
-        const pods = JSON.parse(stdout);
-        const runningPods = pods.items?.filter(
-            (pod: any) => pod.status?.phase === 'Running'
-        ).length || 0;
-        const totalPods = pods.items?.length || 0;
+        const pods = await k8sApi.listNamespacedPod({
+            namespace: 'temporal-prod',
+            labelSelector: 'app.kubernetes.io/component=frontend',
+            limit: 1 // Optimization: We only need to know if ANY are running
+        });
 
-        return {
-            healthy: runningPods > 0,
-            message: `${runningPods}/${totalPods} pods running`,
-        };
-    } catch {
-        return { healthy: false, message: 'Unable to check frontend pods' };
+        const runningPods = pods.items.filter((pod: V1Pod) => pod.status?.phase === 'Running');
+        if (runningPods.length > 0) return { healthy: true, message: 'Frontend service running' };
+        return { healthy: false, message: 'Frontend pods not running' };
+    } catch (error: any) {
+        return { healthy: false, message: `Frontend check failed: ${error?.message || error}` };
     }
 }
 
-async function checkGrafana(): Promise<{ healthy: boolean; message: string }> {
+async function checkGrafana(kc: KubeConfig): Promise<{ healthy: boolean; message: string }> {
+    const k8sApi = kc.makeApiClient(CoreV1Api);
     try {
-        // Check for Grafana service by exact name
-        const { stdout } = await execAsync(
-            'kubectl get svc -n temporal-prod temporal-prod-grafana -o json 2>/dev/null || echo "{\\"items\\":[]}"'
-        );
-        const service = JSON.parse(stdout);
+        // Optimize: Skip service check, just check pods. Service check adds RTT.
+        const pods = await k8sApi.listNamespacedPod({
+            namespace: 'temporal-prod',
+            labelSelector: 'app.kubernetes.io/name=grafana',
+            limit: 1
+        });
 
-        // Also check if pods are running
-        const { stdout: podCheck } = await execAsync(
-            'kubectl get pods -n temporal-prod -l app.kubernetes.io/name=grafana -o json'
-        );
-        const pods = JSON.parse(podCheck);
-        const runningPods = pods.items?.filter(
-            (pod: any) => pod.status?.phase === 'Running'
-        ).length || 0;
-
-        return {
-            healthy: service.metadata?.name && runningPods > 0,
-            message: service.metadata?.name ? `Service available (${runningPods} pod)` : 'Service not found',
-        };
-    } catch {
-        return { healthy: false, message: 'Grafana not accessible' };
+        const runningPods = pods.items.filter((pod: V1Pod) => pod.status?.phase === 'Running');
+        if (runningPods.length > 0) return { healthy: true, message: 'Grafana operational' };
+        return { healthy: false, message: 'Grafana pods not running' };
+    } catch (error: any) {
+        return { healthy: false, message: `Grafana check failed: ${error?.message || error}` };
     }
 }
 
-async function checkPrometheus(): Promise<{ healthy: boolean; message: string }> {
+async function checkPrometheus(kc: KubeConfig): Promise<{ healthy: boolean; message: string }> {
+    const k8sApi = kc.makeApiClient(CoreV1Api);
     try {
-        // Check for Prometheus server service by exact name
-        const { stdout } = await execAsync(
-            'kubectl get svc -n temporal-prod temporal-prod-prometheus-server -o json 2>/dev/null || echo "{\\"items\\":[]}"'
-        );
-        const service = JSON.parse(stdout);
+        // Optimize: Skip service check, just check pods.
+        const pods = await k8sApi.listNamespacedPod({
+            namespace: 'temporal-prod',
+            labelSelector: 'app.kubernetes.io/component=server,app.kubernetes.io/name=prometheus',
+            limit: 1
+        });
 
-        // Check if Prometheus server pod is running
-        const { stdout: podCheck } = await execAsync(
-            'kubectl get pods -n temporal-prod -l "app.kubernetes.io/name=prometheus,app.kubernetes.io/component=server" -o json'
-        );
-        const pods = JSON.parse(podCheck);
-        const runningPods = pods.items?.filter(
-            (pod: any) => pod.status?.phase === 'Running'
-        ).length || 0;
-
-        return {
-            healthy: service.metadata?.name && runningPods > 0,
-            message: service.metadata?.name ? `Scraping metrics (${runningPods} pod)` : 'Service not found',
-        };
-    } catch {
-        return { healthy: false, message: 'Prometheus not accessible' };
+        const runningPods = pods.items.filter((pod: V1Pod) => pod.status?.phase === 'Running');
+        if (runningPods.length > 0) {
+            return { healthy: true, message: 'Prometheus operational' };
+        }
+        return { healthy: false, message: 'Prometheus pods not running' };
+    } catch (error: any) {
+        return { healthy: false, message: `Prometheus check failed: ${error?.message || error}` };
     }
 }
