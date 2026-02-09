@@ -1,7 +1,3 @@
--- Temporal Visibility Store Schema (Sample)
--- This schema is typically managed automatically by the Temporal Server.
--- Provided here for reference.
-
 CREATE TABLE executions_visibility (
   namespace_id CHAR(64) NOT NULL,
   run_id CHAR(64) NOT NULL,
@@ -22,4 +18,3 @@ CREATE TABLE executions_visibility (
 CREATE INDEX idx_visibility_creation_time ON executions_visibility (namespace_id, start_time DESC, run_id);
 CREATE INDEX idx_visibility_status ON executions_visibility (namespace_id, status, start_time DESC, run_id);
 
--- NOTE: In production, rely on Temporal's auto-schema management.

@@ -29,5 +29,46 @@ CREATE TABLE current_executions (
   PRIMARY KEY (shard_id, namespace_id, workflow_id)
 );
 
--- Additional tables would go here (shards, transfer_tasks, timer_tasks, etc.)
+CREATE TABLE shards (
+  shard_id INTEGER NOT NULL,
+  range_id BIGINT NOT NULL,
+  data BYTEA,
+  data_encoding VARCHAR(16),
+  PRIMARY KEY (shard_id)
+);
+
+CREATE TABLE transfer_tasks (
+  shard_id INTEGER NOT NULL,
+  task_id BIGINT NOT NULL,
+  data BYTEA,
+  data_encoding VARCHAR(16),
+  PRIMARY KEY (shard_id, task_id)
+);
+
+CREATE TABLE timer_tasks (
+  shard_id INTEGER NOT NULL,
+  visibility_timestamp TIMESTAMP NOT NULL,
+  task_id BIGINT NOT NULL,
+  data BYTEA,
+  data_encoding VARCHAR(16),
+  PRIMARY KEY (shard_id, visibility_timestamp, task_id)
+);
+
+CREATE TABLE replication_tasks (
+  shard_id INTEGER NOT NULL,
+  task_id BIGINT NOT NULL,
+  data BYTEA,
+  data_encoding VARCHAR(16),
+  PRIMARY KEY (shard_id, task_id)
+);
+
+CREATE TABLE namespaces (
+  id CHAR(64) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  is_global BOOLEAN NOT NULL,
+  data BYTEA,
+  data_encoding VARCHAR(16),
+  PRIMARY KEY (id)
+);
+
 -- NOTE: In production, rely on Temporal's auto-schema management.
